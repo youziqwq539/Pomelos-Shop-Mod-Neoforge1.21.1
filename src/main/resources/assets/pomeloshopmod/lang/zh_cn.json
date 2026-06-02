@@ -25,6 +25,9 @@
   "shop.pomeloshopmod.confirm": "确认",
   "shop.pomeloshopmod.cancel": "取消",
   "shop.pomeloshopmod.back": "返回",
+  "shop.pomeloshopmod.balance_label": "余额: $%d",
+  "shop.pomeloshopmod.prev_page": "< 上一页",
+  "shop.pomeloshopmod.next_page": "下一页 >",
   "shop.pomeloshopmod.select_category": "选择分类:",
   "shop.pomeloshopmod.select_category_first": "请先选择分类！",
   "shop.pomeloshopmod.invalid_amount_or_price": "数量和价格必须大于0！",
@@ -43,6 +46,13 @@
   "shop.pomeloshopmod.listed": "成功上架 %s x%d，价格: $%d",
   "shop.pomeloshopmod.list_failed": "上架失败！",
   "shop.pomeloshopmod.seller": "卖家: %s",
+  
+  "shop.pomeloshopmod.category.blocks": "方块",
+  "shop.pomeloshopmod.category.items": "物品",
+  "shop.pomeloshopmod.category.food": "食物",
+  "shop.pomeloshopmod.category.tools": "工具",
+  "shop.pomeloshopmod.category.armor": "护甲",
+  "shop.pomeloshopmod.category.special": "特殊",
   
   "shop.pomeloshopmod.category_created": "成功创建分类: %s",
   "shop.pomeloshopmod.category_list_header": "=== 商店分类列表 ===",

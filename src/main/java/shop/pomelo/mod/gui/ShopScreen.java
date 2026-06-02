@@ -105,6 +105,11 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         guiGraphics.drawString(this.font, text, centerX - width / 2, y, color, false);
     }
 
+    private void drawCenteredStringNoShadow(GuiGraphics guiGraphics, Component text, int centerX, int y, int color) {
+        int width = this.font.width(text);
+        guiGraphics.drawString(this.font, text, centerX - width / 2, y, color, false);
+    }
+
     private void drawCategories(GuiGraphics guiGraphics, int startX, int startY, int mouseX, int mouseY) {
         List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
 
@@ -188,12 +193,11 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         } else {
             guiGraphics.blit(BUTTONS_TEXTURE, btnX, btnY, 150, 0, btnW, btnH);
         }
-        guiGraphics.drawCenteredString(this.font, "添加", btnX + btnW / 2, btnY + 12, COLOR_WHITE);
-        guiGraphics.drawCenteredString(this.font, "商品", btnX + btnW / 2, btnY + 24, COLOR_WHITE);
+        guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.add_item"), btnX + btnW / 2, btnY + 12, COLOR_WHITE);
     }
 
     private void drawMoneyDisplay(GuiGraphics guiGraphics, int startX, int startY) {
-        guiGraphics.drawString(this.font, "余额: $" + playerMoney, startX + 10, startY + 202,
+        guiGraphics.drawString(this.font, Component.translatable("shop.pomeloshopmod.balance_label", playerMoney), startX + 10, startY + 202,
             COLOR_BLACK, false);
     }
 
@@ -256,8 +260,8 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
                 }
             }
 
-            guiGraphics.drawCenteredString(this.font, "< 上一页", startX + 115, startY + 202, COLOR_WHITE);
-            guiGraphics.drawCenteredString(this.font, "下一页 >", startX + 285, startY + 202, COLOR_WHITE);
+            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.prev_page"), startX + 115, startY + 202, COLOR_WHITE);
+            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.next_page"), startX + 285, startY + 202, COLOR_WHITE);
 
             String pageText = String.format("%d / %d", currentPage + 1, totalPages);
             guiGraphics.drawCenteredString(this.font, pageText, startX + 195, startY + 202, COLOR_WHITE);
@@ -268,7 +272,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         int sx = startX + 82;
         int sy = startY + 168;
 
-        guiGraphics.drawString(this.font, "数量:", sx + 4, sy + 7, COLOR_BLACK, false);
+        guiGraphics.drawString(this.font, Component.translatable("shop.pomeloshopmod.amount_label"), sx + 4, sy + 7, COLOR_BLACK, false);
 
         boolean hoverMinus10 = mouseX >= sx + 36 && mouseX <= sx + 58 && mouseY >= sy + 4 && mouseY <= sy + 18;
         boolean hoverMinus1 = mouseX >= sx + 62 && mouseX <= sx + 80 && mouseY >= sy + 4 && mouseY <= sy + 18;
@@ -299,10 +303,10 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         boolean hoverConfirm = mouseX >= sx + 200 && mouseX <= sx + 232 && mouseY >= sy + 17 && mouseY <= sy + 31;
 
         guiGraphics.blit(BUTTONS_TEXTURE, sx + 200, sy + 2, hoverCancel ? 102 : 68, 150, 32, 14);
-        drawCenteredStringNoShadow(guiGraphics, "取消", sx + 216, sy + 4, COLOR_BLACK);
+        drawCenteredStringNoShadow(guiGraphics, Component.translatable("shop.pomeloshopmod.cancel"), sx + 216, sy + 4, COLOR_BLACK);
 
         guiGraphics.blit(BUTTONS_TEXTURE, sx + 200, sy + 17, hoverConfirm ? 34 : 0, 150, 32, 14);
-        drawCenteredStringNoShadow(guiGraphics, "确认", sx + 216, sy + 19, COLOR_BLACK);
+        drawCenteredStringNoShadow(guiGraphics, Component.translatable("shop.pomeloshopmod.confirm"), sx + 216, sy + 19, COLOR_BLACK);
     }
 
     @Override

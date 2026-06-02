@@ -64,15 +64,6 @@ public class NetworkHandler {
                 );
                 
                 if (itemId != null) {
-                    serverPlayer.sendSystemMessage(
-                        net.minecraft.network.chat.Component.translatable(
-                            "shop.pomeloshopmod.listed",
-                            packet.itemStack().getHoverName(),
-                            packet.amount(),
-                            packet.price()
-                        )
-                    );
-                    
                     java.util.List<shop.pomelo.mod.shop.ShopItem> items = 
                         new java.util.ArrayList<>(ShopManager.getInstance().getAllItems());
                     net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
@@ -99,13 +90,6 @@ public class NetworkHandler {
                     packet.displayName(),
                     serverPlayer.getUUID(),
                     serverPlayer.getName().getString()
-                );
-                
-                serverPlayer.sendSystemMessage(
-                    net.minecraft.network.chat.Component.translatable(
-                        "shop.pomeloshopmod.category_created",
-                        packet.displayName()
-                    )
                 );
                 
                 java.util.List<shop.pomelo.mod.shop.ShopCategory> categories = 
@@ -169,23 +153,11 @@ public class NetworkHandler {
                 boolean success = ShopManager.getInstance().removeListing(packet.itemId(), serverPlayer);
                 
                 if (success) {
-                    serverPlayer.sendSystemMessage(
-                        net.minecraft.network.chat.Component.translatable(
-                            "shop.pomeloshopmod.item_deleted"
-                        )
-                    );
-                    
                     java.util.List<shop.pomelo.mod.shop.ShopItem> items = 
                         new java.util.ArrayList<>(ShopManager.getInstance().getAllItems());
                     net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
                         serverPlayer, 
                         new SyncShopItemsPacket(items)
-                    );
-                } else {
-                    serverPlayer.sendSystemMessage(
-                        net.minecraft.network.chat.Component.translatable(
-                            "shop.pomeloshopmod.delete_failed"
-                        )
                     );
                 }
             }
@@ -205,12 +177,6 @@ public class NetworkHandler {
                 boolean success = CategoryManager.getInstance().removeCategory(packet.categoryId());
                 
                 if (success) {
-                    serverPlayer.sendSystemMessage(
-                        net.minecraft.network.chat.Component.translatable(
-                            "shop.pomeloshopmod.category_deleted"
-                        )
-                    );
-                    
                     java.util.List<shop.pomelo.mod.shop.ShopCategory> categories = 
                         new java.util.ArrayList<>(CategoryManager.getInstance().getCategories());
                     net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
@@ -223,12 +189,6 @@ public class NetworkHandler {
                     net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
                         serverPlayer, 
                         new SyncShopItemsPacket(items)
-                    );
-                } else {
-                    serverPlayer.sendSystemMessage(
-                        net.minecraft.network.chat.Component.translatable(
-                            "shop.pomeloshopmod.category_delete_failed"
-                        )
                     );
                 }
             }

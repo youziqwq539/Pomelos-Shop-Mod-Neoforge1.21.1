@@ -11,18 +11,18 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class CategoryManager {
     private static CategoryManager instance;
     private final Map<String, ShopCategory> categories = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Path dataPath;
     private volatile List<ShopCategory> cachedList = List.of();
-    // Cache Gson instance — creating GsonBuilder + Gson on every save is wasteful
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    // Track if we need to save (dirty flag to batch rapid changes)
     private volatile boolean dirty = false;
-    private volatile long lastSaveTime = 0;
-    private static final long MIN_SAVE_INTERVAL_MS = 2000; // Debounce saves to at most once per 2 seconds
+    private ScheduledExecutorService autoSaveExecutor;
 
     private CategoryManager() {
         this.dataPath = null;
@@ -46,6 +46,32 @@ public class CategoryManager {
         instance = new CategoryManager(path);
     }
 
+    public void startAutoSave() {
+        if (autoSaveExecutor != null) {
+            autoSaveExecutor.shutdown();
+        }
+        autoSaveExecutor = Executors.newSingleThreadScheduledExecutor();
+        autoSaveExecutor.scheduleWithFixedDelay(() -> {
+            if (dirty && dataPath != null) {
+                flushSave();
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+    }
+
+    public void stopAutoSave() {
+        if (autoSaveExecutor != null) {
+            autoSaveExecutor.shutdown();
+            try {
+                if (!autoSaveExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    autoSaveExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                autoSaveExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     public void addCategory(String id, String displayName, UUID creatorUUID, String creatorName) {
         if (categories.containsKey(id)) {
             return;
@@ -54,7 +80,7 @@ public class CategoryManager {
         ShopCategory category = new ShopCategory(id, displayName, creatorUUID, creatorName);
         categories.put(id, category);
         invalidateCache();
-        markDirtyAndSave();
+        markDirty();
     }
 
     public boolean removeCategory(String id) {
@@ -65,7 +91,7 @@ public class CategoryManager {
 
         categories.remove(id);
         invalidateCache();
-        markDirtyAndSave();
+        markDirty();
         return true;
     }
 
@@ -81,7 +107,7 @@ public class CategoryManager {
 
         categories.remove(id);
         invalidateCache();
-        markDirtyAndSave();
+        markDirty();
     }
 
     public void invalidateCache() {
@@ -114,31 +140,16 @@ public class CategoryManager {
         categories.put(category.getId(), category);
     }
 
-    /**
-     * Marks data as dirty and triggers a debounced save.
-     * Rapid successive calls will only result in one actual file write.
-     */
-    private void markDirtyAndSave() {
+    private void markDirty() {
         dirty = true;
-        long now = System.currentTimeMillis();
-        // Debounce: skip save if we just saved recently and mark dirty for later
-        if (now - lastSaveTime >= MIN_SAVE_INTERVAL_MS) {
-            flushSave();
-        }
     }
 
-    /**
-     * Immediately writes pending changes to disk.
-     * Called by markDirtyAndSave when the debounce interval has passed,
-     * and should be called on server shutdown to ensure all data is persisted.
-     */
     public void flushSave() {
         if (!dirty || dataPath == null) {
             return;
         }
         saveToFile();
         dirty = false;
-        lastSaveTime = System.currentTimeMillis();
     }
 
     private void saveToFile() {
@@ -171,6 +182,10 @@ public class CategoryManager {
     }
 
     private void loadFromFile() {
+        categories.clear();
+        invalidateCache();
+        dirty = false;
+
         if (dataPath == null || !Files.exists(dataPath)) {
             PomelosShopMod.LOGGER.info("Categories file not found, starting with empty categories");
             return;

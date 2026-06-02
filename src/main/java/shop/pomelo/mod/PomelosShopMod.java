@@ -65,7 +65,8 @@ public class PomelosShopMod {
         LOGGER.info("Shop data loaded and auto-save started");
         
         shop.pomelo.mod.shop.CategoryManager.initialize(event.getServer());
-        LOGGER.info("Category manager initialized");
+        shop.pomelo.mod.shop.CategoryManager.getInstance().startAutoSave();
+        LOGGER.info("Category manager initialized with auto-save");
 
         java.nio.file.Path bannedItemsPath = dataDir.resolve("banned_items.json");
         BannedItemsManager.getInstance().loadFromFile(bannedItemsPath);
@@ -82,6 +83,7 @@ public class PomelosShopMod {
         ShopManager.getInstance().saveToFile(shopDataPath);
         LOGGER.info("Shop data saved");
 
+        shop.pomelo.mod.shop.CategoryManager.getInstance().stopAutoSave();
         shop.pomelo.mod.shop.CategoryManager.getInstance().flushSave();
         LOGGER.info("Categories saved");
     }

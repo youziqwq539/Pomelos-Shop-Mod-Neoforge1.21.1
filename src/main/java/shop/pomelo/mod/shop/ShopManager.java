@@ -322,6 +322,12 @@ public class ShopManager {
     }
 
     public void loadFromFile(Path path) {
+        items.clear();
+        categoryIndex.clear();
+        sortedCache = null;
+        nextOrderIndex = 0;
+        dirty = false;
+
         if (!Files.exists(path)) {
             PomelosShopMod.LOGGER.info("Shop data file not found, using defaults");
             loadDefaultItems();
@@ -329,7 +335,6 @@ public class ShopManager {
         }
 
         try (Reader reader = new InputStreamReader(Files.newInputStream(path), StandardCharsets.UTF_8)) {
-            items.clear();
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
 
             if (root.has("items")) {
@@ -362,7 +367,6 @@ public class ShopManager {
                     }
                 }
             }
-            invalidateCache();
         } catch (IOException e) {
             PomelosShopMod.LOGGER.error("Failed to load shop data", e);
             loadDefaultItems();
@@ -370,6 +374,11 @@ public class ShopManager {
     }
 
     private void loadDefaultItems() {
+        items.clear();
+        categoryIndex.clear();
+        sortedCache = null;
+        nextOrderIndex = 0;
+        dirty = false;
         PomelosShopMod.LOGGER.info("No default items loaded. Players can list their own items.");
     }
 

@@ -244,20 +244,10 @@ public class AddItemScreen extends Screen {
             int price = Integer.parseInt(priceBox.getValue());
             
             if (amount <= 0 || price <= 0) {
-                if (this.minecraft != null && this.minecraft.player != null) {
-                    this.minecraft.player.sendSystemMessage(
-                        Component.translatable("shop.pomeloshopmod.invalid_amount_or_price")
-                    );
-                }
                 return;
             }
 
             if (selectedCategory.isEmpty()) {
-                if (this.minecraft != null && this.minecraft.player != null) {
-                    this.minecraft.player.sendSystemMessage(
-                        Component.translatable("shop.pomeloshopmod.select_category_first")
-                    );
-                }
                 return;
             }
 
@@ -271,20 +261,8 @@ public class AddItemScreen extends Screen {
                 new ListItemPacket(itemStack, price, sellPrice, amount, selectedCategory)
             );
 
-            if (this.minecraft != null && this.minecraft.player != null) {
-                this.minecraft.player.sendSystemMessage(
-                    Component.translatable("shop.pomeloshopmod.listed", 
-                        itemStack.getHoverName(), amount, price)
-                );
-            }
-
             this.onClose();
         } catch (NumberFormatException e) {
-            if (this.minecraft != null && this.minecraft.player != null) {
-                this.minecraft.player.sendSystemMessage(
-                    Component.translatable("shop.pomeloshopmod.invalid_number")
-                );
-            }
         }
     }
 

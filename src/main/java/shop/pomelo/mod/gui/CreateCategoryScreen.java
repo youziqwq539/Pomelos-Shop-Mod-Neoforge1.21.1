@@ -79,11 +79,6 @@ public class CreateCategoryScreen extends Screen {
         String name = nameBox.getValue().trim();
 
         if (name.isEmpty()) {
-            if (this.minecraft != null && this.minecraft.player != null) {
-                this.minecraft.player.sendSystemMessage(
-                    Component.translatable("shop.pomeloshopmod.category_empty_name")
-                );
-            }
             return;
         }
 
