@@ -42,6 +42,7 @@ public class PomelosShopModClient {
     @SubscribeEvent
     static void onRegisterScreens(RegisterMenuScreensEvent event) {
         event.register(PomelosShopMod.SHOP_MENU.get(), ShopScreen::new);
+        event.register(PomelosShopMod.WALLET_MENU.get(), shop.pomelo.mod.gui.WalletScreen::new);
         PomelosShopMod.LOGGER.info("Shop screen registered");
     }
 }

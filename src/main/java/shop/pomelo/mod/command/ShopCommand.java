@@ -1,5 +1,8 @@
 package shop.pomelo.mod.command;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -15,6 +18,10 @@ import net.minecraft.world.item.ItemStack;
 import shop.pomelo.mod.shop.BannedItemsManager;
 import shop.pomelo.mod.shop.CategoryManager;
 import shop.pomelo.mod.shop.ShopManager;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public class ShopCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
@@ -36,7 +43,20 @@ public class ShopCommand {
                         .then(Commands.argument("name", StringArgumentType.greedyString())
                             .executes(ShopCommand::createCategory))))
                 .then(Commands.literal("list")
-                    .executes(ShopCommand::listCategories)))
+                    .executes(ShopCommand::listCategories))
+                .then(Commands.literal("moveup")
+                    .requires(source -> source.hasPermission(2))
+                    .then(Commands.argument("name", StringArgumentType.greedyString())
+                        .executes(ShopCommand::moveCategoryUp)))
+                .then(Commands.literal("movedown")
+                    .requires(source -> source.hasPermission(2))
+                    .then(Commands.argument("name", StringArgumentType.greedyString())
+                        .executes(ShopCommand::moveCategoryDown)))
+                .then(Commands.literal("setparent")
+                    .requires(source -> source.hasPermission(2))
+                    .then(Commands.argument("child", StringArgumentType.string())
+                        .then(Commands.argument("parent", StringArgumentType.greedyString())
+                            .executes(ShopCommand::setCategoryParent)))))
             .then(Commands.literal("add")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.argument("player", EntityArgument.player())
@@ -63,7 +83,15 @@ public class ShopCommand {
                     .executes(ShopCommand::unbanItem)))
             .then(Commands.literal("banlist")
                 .requires(source -> source.hasPermission(2))
-                .executes(ShopCommand::banlist)));
+                .executes(ShopCommand::banlist))
+            .then(Commands.literal("export")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("filename", StringArgumentType.word())
+                    .executes(ShopCommand::exportShop)))
+            .then(Commands.literal("import")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("filename", StringArgumentType.word())
+                    .executes(ShopCommand::importShop))));
     }
 
     private static int openShop(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
@@ -310,5 +338,187 @@ public class ShopCommand {
         }
         
         return 1;
+    }
+
+    private static int moveCategoryUp(CommandContext<CommandSourceStack> context) {
+        String categoryName = StringArgumentType.getString(context, "name");
+        
+        shop.pomelo.mod.shop.ShopCategory category = CategoryManager.getInstance().getCategoryByName(categoryName);
+        if (category == null) {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_not_found", categoryName));
+            return 0;
+        }
+        
+        boolean success = CategoryManager.getInstance().moveCategoryUp(category.getId());
+        
+        if (success) {
+            // Sync to all online players
+            syncCategoriesToAllPlayers(context.getSource().getServer());
+            context.getSource().sendSuccess(() -> Component.translatable("shop.pomeloshopmod.category_moved_up", categoryName), true);
+        } else {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_move_failed", categoryName));
+        }
+        
+        return success ? 1 : 0;
+    }
+
+    private static int moveCategoryDown(CommandContext<CommandSourceStack> context) {
+        String categoryName = StringArgumentType.getString(context, "name");
+        
+        shop.pomelo.mod.shop.ShopCategory category = CategoryManager.getInstance().getCategoryByName(categoryName);
+        if (category == null) {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_not_found", categoryName));
+            return 0;
+        }
+        
+        boolean success = CategoryManager.getInstance().moveCategoryDown(category.getId());
+        
+        if (success) {
+            // Sync to all online players
+            syncCategoriesToAllPlayers(context.getSource().getServer());
+            context.getSource().sendSuccess(() -> Component.translatable("shop.pomeloshopmod.category_moved_down", categoryName), true);
+        } else {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_move_failed", categoryName));
+        }
+        
+        return success ? 1 : 0;
+    }
+
+    private static int setCategoryParent(CommandContext<CommandSourceStack> context) {
+        String childCategoryName = StringArgumentType.getString(context, "child");
+        String parentCategoryName = StringArgumentType.getString(context, "parent");
+        
+        shop.pomelo.mod.shop.ShopCategory childCategory = CategoryManager.getInstance().getCategory(childCategoryName);
+        if (childCategory == null) {
+            childCategory = CategoryManager.getInstance().getCategoryByName(childCategoryName);
+        }
+        
+        if (childCategory == null) {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_not_found", childCategoryName));
+            return 0;
+        }
+        
+        shop.pomelo.mod.shop.ShopCategory parentCategory = null;
+        if (parentCategoryName != null && !parentCategoryName.isEmpty() && 
+            !parentCategoryName.equalsIgnoreCase("none") && !parentCategoryName.equalsIgnoreCase("null")) {
+            parentCategory = CategoryManager.getInstance().getCategory(parentCategoryName);
+            if (parentCategory == null) {
+                parentCategory = CategoryManager.getInstance().getCategoryByName(parentCategoryName);
+            }
+            
+            if (parentCategory == null) {
+                context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_not_found", parentCategoryName));
+                return 0;
+            }
+        }
+        
+        boolean success = CategoryManager.getInstance().setCategoryParent(childCategoryName, parentCategoryName);
+        
+        if (success) {
+            syncCategoriesToAllPlayers(context.getSource().getServer());
+            // Create final references for lambda usage
+            final shop.pomelo.mod.shop.ShopCategory finalChildCategory = childCategory;
+            final shop.pomelo.mod.shop.ShopCategory finalParentCategory = parentCategory;
+            
+            if (parentCategory != null) {
+                context.getSource().sendSuccess(() -> Component.translatable("shop.pomeloshopmod.category_parent_set", 
+                    finalChildCategory.getDisplayName(), finalParentCategory.getDisplayName()), true);
+            } else {
+                context.getSource().sendSuccess(() -> Component.translatable("shop.pomeloshopmod.category_parent_removed", 
+                    finalChildCategory.getDisplayName()), true);
+            }
+        } else {
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.category_parent_failed", childCategoryName));
+        }
+        
+        return success ? 1 : 0;
+    }
+
+    private static void syncCategoriesToAllPlayers(net.minecraft.server.MinecraftServer server) {
+        java.util.List<shop.pomelo.mod.shop.ShopCategory> categories = 
+            new java.util.ArrayList<>(CategoryManager.getInstance().getCategories());
+        
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
+                player, 
+                new shop.pomelo.mod.network.SyncCategoriesPacket(categories)
+            );
+        }
+    }
+
+    private static final Gson EXPORT_GSON = new GsonBuilder().setPrettyPrinting().create();
+
+    private static int exportShop(CommandContext<CommandSourceStack> context) {
+        String filename = StringArgumentType.getString(context, "filename");
+        
+        try {
+            Path exportDir = context.getSource().getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("shop_exports");
+            Files.createDirectories(exportDir);
+            
+            Path exportFile = exportDir.resolve(filename + ".json");
+            
+            JsonObject root = new JsonObject();
+            root.add("categories", CategoryManager.getInstance().exportToJson());
+            root.add("items", ShopManager.getInstance().exportToJson());
+            
+            String json = EXPORT_GSON.toJson(root);
+            Files.writeString(exportFile, json, StandardCharsets.UTF_8);
+            
+            int itemCount = ShopManager.getInstance().getAllItems().size();
+            int categoryCount = CategoryManager.getInstance().getCategories().size();
+            
+            context.getSource().sendSuccess(() -> Component.translatable(
+                "shop.pomeloshopmod.export_success",
+                itemCount, categoryCount, exportFile.getFileName().toString()
+            ), true);
+            
+            return 1;
+        } catch (Exception e) {
+            shop.pomelo.mod.PomelosShopMod.LOGGER.error("Failed to export shop data", e);
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.export_failed", e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int importShop(CommandContext<CommandSourceStack> context) {
+        String filename = StringArgumentType.getString(context, "filename");
+        
+        try {
+            Path importFile = context.getSource().getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("shop_exports").resolve(filename + ".json");
+            
+            if (!Files.exists(importFile)) {
+                context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.import_file_not_found", filename));
+                return 0;
+            }
+            
+            String json = Files.readString(importFile, StandardCharsets.UTF_8);
+            JsonObject root = EXPORT_GSON.fromJson(json, JsonObject.class);
+            
+            int importedCategories = 0;
+            int importedItems = 0;
+            
+            if (root.has("categories")) {
+                importedCategories = CategoryManager.getInstance().importFromJson(root.getAsJsonObject("categories"), true);
+            }
+            
+            if (root.has("items")) {
+                importedItems = ShopManager.getInstance().importFromJson(root.getAsJsonObject("items"), true);
+            }
+            
+            final int categories = importedCategories;
+            final int items = importedItems;
+            context.getSource().sendSuccess(() -> Component.translatable(
+                "shop.pomeloshopmod.import_success",
+                items, categories
+            ), true);
+            
+            return 1;
+        } catch (Exception e) {
+            shop.pomelo.mod.PomelosShopMod.LOGGER.error("Failed to import shop data", e);
+            context.getSource().sendFailure(Component.translatable("shop.pomeloshopmod.import_failed", e.getMessage()));
+            return 0;
+        }
     }
 }

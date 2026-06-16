@@ -6,14 +6,20 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import shop.pomelo.mod.network.ListItemPacket;
 import shop.pomelo.mod.shop.CategoryManager;
 import shop.pomelo.mod.shop.ShopCategory;
+import shop.pomelo.mod.shop.ShopClipboard;
 import shop.pomelo.mod.shop.ShopItem;
 import shop.pomelo.mod.shop.ShopManager;
+import shop.pomelo.mod.ShopConfig;
+import shop.pomelo.mod.sound.ModSounds;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     private static final ResourceLocation BACKGROUND_TEXTURE = ResourceLocation.fromNamespaceAndPath("pomeloshopmod", "textures/gui/shop_background.png");
@@ -28,6 +34,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         ResourceLocation.fromNamespaceAndPath("pomeloshopmod", "textures/gui/row3_hover.png"),
         ResourceLocation.fromNamespaceAndPath("pomeloshopmod", "textures/gui/row4_hover.png")
     };
+    private static final ResourceLocation TOOLTIP_TEXTURE = ResourceLocation.fromNamespaceAndPath("pomeloshopmod", "textures/gui/tooltip_background.png");
     
     private static final int ITEMS_PER_PAGE = 28;
     private static final int CATEGORIES_PER_PAGE = 4;
@@ -37,6 +44,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     private static final int COLOR_GRAY = new Color(180, 180, 180).getRGB();
     private static final int COLOR_DISABLED = new Color(100, 100, 110, 50).getRGB();
     private static final int COLOR_GREEN = new Color(100, 200, 100).getRGB();
+    private static final int COLOR_DARK_BLUE = new Color(30, 58, 138).getRGB();
 
     private int currentPage = 0;
     private String currentCategory = "";
@@ -48,16 +56,35 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     private ShopItem selectedItem = null;
 
     private int categoryScrollOffset = 0;
+    private Set<String> expandedCategories = new HashSet<>(); // 存储展开的一级分类ID
 
     public ShopScreen(ShopMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
         this.imageWidth = 320;
         this.imageHeight = 220;
     }
+    
+    /**
+     * 播放按钮点击音效
+     */
+    private void playButtonClickSound() {
+        if (this.minecraft != null && this.minecraft.player != null) {
+            this.minecraft.player.playSound(ModSounds.SHOP_CLICK.get(), 0.3F, 1.0F);
+        }
+    }
 
     @Override
     protected void init() {
         super.init();
+        // Auto-select first main category if none selected
+        if (currentCategory.isEmpty()) {
+            List<ShopCategory> mainCategories = CategoryManager.getInstance().getMainCategories();
+            if (!mainCategories.isEmpty()) {
+                currentCategory = mainCategories.get(0).getId();
+                // 默认展开第一个一级分类
+                expandedCategories.add(mainCategories.get(0).getId());
+            }
+        }
         updateDisplayedItems();
     }
 
@@ -111,7 +138,8 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     }
 
     private void drawCategories(GuiGraphics guiGraphics, int startX, int startY, int mouseX, int mouseY) {
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
+        // 获取一级分类
+        List<ShopCategory> mainCategories = CategoryManager.getInstance().getMainCategories();
 
         boolean isAddButtonHovered = mouseX >= startX + 8 && mouseX <= startX + 28 && 
                                      mouseY >= startY + 8 && mouseY <= startY + 28;
@@ -127,39 +155,90 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         guiGraphics.drawCenteredString(this.font, "-", startX + 52, startY + 12,
             isDeleteButtonHovered ? COLOR_WHITE : COLOR_GRAY);
         
-        int y = startY + 35;
-        for (int i = categoryScrollOffset; i < Math.min(categories.size(), categoryScrollOffset + CATEGORIES_PER_PAGE); i++) {
-            ShopCategory category = categories.get(i);
-
-            boolean isHovered = mouseX >= startX + 8 && mouseX <= startX + 68 && 
-                               mouseY >= y && mouseY <= y + 25;
+        // 构建显示列表：一级分类 + 展开时显示其下的二级分类
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList(mainCategories);
+        
+        int y = startY + 30;
+        int itemHeight = 14; // 每个分类项的高度
+        int maxDisplayItems = 8; // 最大显示数量
+        
+        for (int i = categoryScrollOffset; i < Math.min(displayItems.size(), categoryScrollOffset + maxDisplayItems); i++) {
+            CategoryDisplayItem item = displayItems.get(i);
+            ShopCategory category = item.category;
+            
+            int xOffset = item.isSubCategory ? 15 : 0; // 二级分类向右偏移
+            int catWidth = item.isSubCategory ? 47 : 62; // 二级分类宽度较小
+            
+            boolean isHovered = mouseX >= startX + 3 + xOffset && mouseX <= startX + 3 + xOffset + catWidth && 
+                               mouseY >= y && mouseY <= y + itemHeight;
             boolean isSelected = category.getId().equals(currentCategory);
 
             if (isSelected || isHovered) {
-                guiGraphics.blit(BUTTONS_TEXTURE, startX + 7, y - 1, 0, 24, 62, 27);
+                guiGraphics.blit(BUTTONS_TEXTURE, startX + 2 + xOffset, y - 1, 0, 24, catWidth, itemHeight + 2);
+            }
+
+            // 一级分类显示展开/折叠箭头
+            if (!item.isSubCategory) {
+                boolean isExpanded = expandedCategories.contains(category.getId());
+                List<ShopCategory> subCategories = CategoryManager.getInstance().getSubCategories(category.getId());
+                boolean hasSubCategories = !subCategories.isEmpty();
+                
+                String arrow = hasSubCategories ? (isExpanded ? "▼" : "▶") : " ";
+                guiGraphics.drawString(this.font, arrow, startX + 5, y + 5, 
+                    hasSubCategories ? (isHovered ? COLOR_WHITE : COLOR_BLACK) : COLOR_GRAY, false);
             }
 
             String text = category.getDisplayName();
             int textWidth = this.font.width(text);
-            int textX = startX + 40 - textWidth / 2;
+            int maxTextWidth = catWidth - (item.isSubCategory ? 4 : 12); // 一级分类要留箭头空间
+            if (textWidth > maxTextWidth) {
+                text = text.substring(0, (int)(text.length() * maxTextWidth / textWidth)) + "...";
+                textWidth = this.font.width(text);
+            }
+            int textX = startX + 3 + xOffset + (item.isSubCategory ? 2 : 12) + (catWidth - (item.isSubCategory ? 2 : 12) - textWidth) / 2;
             int textColor = (isSelected || isHovered) ? COLOR_WHITE : COLOR_BLACK;
-            guiGraphics.drawString(this.font, text, textX, y + 8, textColor, false);
+            guiGraphics.drawString(this.font, text, textX, y + 5, textColor, false);
 
-            y += 30;
+            y += itemHeight + 2;
         }
 
-        if (categories.size() > CATEGORIES_PER_PAGE) {
-            drawCategoryScrollButtons(guiGraphics, startX, startY, mouseX, mouseY, categories);
+        if (displayItems.size() > maxDisplayItems) {
+            drawCategoryScrollButtons(guiGraphics, startX, startY, mouseX, mouseY, displayItems.size(), maxDisplayItems, itemHeight + 2);
+        }
+    }
+    
+    private List<CategoryDisplayItem> buildCategoryDisplayList(List<ShopCategory> mainCategories) {
+        List<CategoryDisplayItem> items = new ArrayList<>();
+        for (ShopCategory mainCat : mainCategories) {
+            items.add(new CategoryDisplayItem(mainCat, false));
+            // 只有展开时才显示二级分类
+            if (expandedCategories.contains(mainCat.getId())) {
+                List<ShopCategory> subCategories = CategoryManager.getInstance().getSubCategories(mainCat.getId());
+                for (ShopCategory subCat : subCategories) {
+                    items.add(new CategoryDisplayItem(subCat, true));
+                }
+            }
+        }
+        return items;
+    }
+    
+    private static class CategoryDisplayItem {
+        final ShopCategory category;
+        final boolean isSubCategory;
+        
+        CategoryDisplayItem(ShopCategory category, boolean isSubCategory) {
+            this.category = category;
+            this.isSubCategory = isSubCategory;
         }
     }
 
-    private void drawCategoryScrollButtons(GuiGraphics guiGraphics, int startX, int startY, 
-                                           int mouseX, int mouseY, List<ShopCategory> categories) {
+    private void drawCategoryScrollButtons(GuiGraphics guiGraphics, int startX, int startY,
+                                           int mouseX, int mouseY, int totalItems, int maxDisplayItems, int itemHeight) {
         boolean canScrollUp = categoryScrollOffset > 0;
-        boolean canScrollDown = categoryScrollOffset < categories.size() - CATEGORIES_PER_PAGE;
+        boolean canScrollDown = categoryScrollOffset < totalItems - maxDisplayItems;
 
-        int btnX = startX + 8;
-        int upBtnY = startY + 35 + CATEGORIES_PER_PAGE * 30 + 2;
+        int btnX = startX + 10;
+        int upBtnY = startY + 27 + maxDisplayItems * itemHeight + 2;
         int downBtnY = upBtnY + 22;
         int btnW = 56;
         int btnH = 20;
@@ -229,6 +308,58 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
 
                 guiGraphics.renderItem(item.getDisplayStack(), x + 6, y + 6);
 
+                // Draw buy price above item with smaller font (dark green) - 已售空不显示购买价格
+                float scale = 0.6f;
+                if (!item.isSoldOut()) {
+                    String priceText = "$" + item.getBuyPrice();
+                    int textWidth = (int)(this.font.width(priceText) * scale);
+                    int centerX = x + 14 - textWidth / 2; // Center in 28px cell
+                    
+                    guiGraphics.pose().pushPose();
+                    guiGraphics.pose().translate(centerX, y + 1, 0);
+                    guiGraphics.pose().scale(scale, scale, 1.0f);
+                    guiGraphics.drawString(this.font, priceText, 0, 0, 0x40E88F, true);
+                    guiGraphics.pose().popPose();
+                }
+
+                // Draw sell price below item with smaller font (dark blue)
+                if (item.canSell()) {
+                    String sellPriceText = "$" + item.getSellPrice();
+                    int sellTextWidth = (int)(this.font.width(sellPriceText) * scale);
+                    int sellCenterX = x + 14 - sellTextWidth / 2;
+                    
+                    guiGraphics.pose().pushPose();
+                    guiGraphics.pose().translate(sellCenterX, y + 24, 0);
+                    guiGraphics.pose().scale(scale, scale, 1.0f);
+                    guiGraphics.drawString(this.font, sellPriceText, 0, 0, COLOR_DARK_BLUE, true);
+                    guiGraphics.pose().popPose();
+                }
+
+                // 显示已售空或库存信息
+                if (item.isSoldOut()) {
+                    float soldOutScale = 0.5f;
+                    String soldOutText = Component.translatable("shop.pomeloshopmod.sold_out").getString();
+                    int soldOutWidth = (int)(this.font.width(soldOutText) * soldOutScale);
+                    int soldOutCenterX = x + 14 - soldOutWidth / 2;
+                    
+                    guiGraphics.pose().pushPose();
+                    guiGraphics.pose().translate(soldOutCenterX, y + 12, 0);
+                    guiGraphics.pose().scale(soldOutScale, soldOutScale, 1.0f);
+                    guiGraphics.drawString(this.font, soldOutText, 0, 0, Color.RED.getRGB(), true);
+                    guiGraphics.pose().popPose();
+                } else if (item.hasLimitedStock()) {
+                    float stockScale = 0.5f;
+                    String stockText = "x" + item.getStock();
+                    int stockWidth = (int)(this.font.width(stockText) * stockScale);
+                    int stockCenterX = x + 14 - stockWidth / 2;
+                    
+                    guiGraphics.pose().pushPose();
+                    guiGraphics.pose().translate(stockCenterX, y + 12, 0);
+                    guiGraphics.pose().scale(stockScale, stockScale, 1.0f);
+                    guiGraphics.drawString(this.font, stockText, 0, 0, COLOR_GRAY, true);
+                    guiGraphics.pose().popPose();
+                }
+
                 if (isHovered) {
                     hoveredItem = item;
                 }
@@ -246,25 +377,25 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             boolean canNext = currentPage < totalPages - 1;
 
             if (canPrev) {
-                boolean prevHovered = mouseX >= startX + 90 && mouseX <= startX + 140 &&
-                                     mouseY >= startY + 200 && mouseY <= startY + 215;
+                boolean prevHovered = mouseX >= startX + 100 && mouseX <= startX + 150 &&
+                                     mouseY >= startY + 124 && mouseY <= startY + 139;
                 if (prevHovered) {
-                    guiGraphics.blit(BUTTONS_TEXTURE, startX + 89, startY + 199, 0, 107, 52, 17);
+                    guiGraphics.blit(BUTTONS_TEXTURE, startX + 99, startY + 123, 0, 107, 52, 17);
                 }
             }
             if (canNext) {
-                boolean nextHovered = mouseX >= startX + 260 && mouseX <= startX + 310 &&
-                                     mouseY >= startY + 200 && mouseY <= startY + 215;
+                boolean nextHovered = mouseX >= startX + 270 && mouseX <= startX + 320 &&
+                                     mouseY >= startY + 124 && mouseY <= startY + 139;
                 if (nextHovered) {
-                    guiGraphics.blit(BUTTONS_TEXTURE, startX + 259, startY + 199, 0, 107, 52, 17);
+                    guiGraphics.blit(BUTTONS_TEXTURE, startX + 269, startY + 123, 0, 107, 52, 17);
                 }
             }
 
-            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.prev_page"), startX + 115, startY + 202, COLOR_WHITE);
-            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.next_page"), startX + 285, startY + 202, COLOR_WHITE);
+            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.prev_page"), startX + 125, startY + 126, COLOR_WHITE);
+            guiGraphics.drawCenteredString(this.font, Component.translatable("shop.pomeloshopmod.next_page"), startX + 295, startY + 126, COLOR_WHITE);
 
             String pageText = String.format("%d / %d", currentPage + 1, totalPages);
-            guiGraphics.drawCenteredString(this.font, pageText, startX + 195, startY + 202, COLOR_WHITE);
+            guiGraphics.drawCenteredString(this.font, pageText, startX + 205, startY + 126, COLOR_WHITE);
         }
     }
 
@@ -317,6 +448,13 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             List<Component> tooltip = new ArrayList<>();
             tooltip.add(hoveredItem.getHoverName());
             
+            // 库存信息显示在物品名称下方
+            if (hoveredItem.isSoldOut()) {
+                tooltip.add(Component.translatable("shop.pomeloshopmod.sold_out").withColor(Color.RED.getRGB()));
+            } else if (hoveredItem.hasLimitedStock()) {
+                tooltip.add(Component.translatable("shop.pomeloshopmod.stock_info", hoveredItem.getStock()));
+            }
+            
             if (hoveredItem.canBuy()) {
                 tooltip.add(Component.translatable("shop.pomeloshopmod.buy_price", hoveredItem.getBuyPrice()));
             }
@@ -330,10 +468,67 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             
             if (hoveredItem.isPlayerListing()) {
                 tooltip.add(Component.translatable("shop.pomeloshopmod.ctrl_right_click_delete"));
+                tooltip.add(Component.translatable("shop.pomeloshopmod.shift_left_click_edit"));
+            }
+            
+            // 复制粘贴提示
+            tooltip.add(Component.translatable("shop.pomeloshopmod.ctrl_c_copy"));
+            if (ShopClipboard.getInstance().hasContent()) {
+                tooltip.add(Component.translatable("shop.pomeloshopmod.ctrl_v_paste"));
             }
 
-            guiGraphics.renderComponentTooltip(this.font, tooltip, x, y);
+            renderTransparentTooltip(guiGraphics, tooltip, x, y);
         }
+    }
+
+    private void renderTransparentTooltip(GuiGraphics guiGraphics, List<Component> tooltip, int x, int y) {
+        // Calculate tooltip dimensions
+        int width = 0;
+        for (Component line : tooltip) {
+            int lineWidth = this.font.width(line);
+            if (lineWidth > width) {
+                width = lineWidth;
+            }
+        }
+        width += 16; // padding
+        
+        int height = tooltip.size() * 10 + 8; // 10px per line + padding
+        
+        // Adjust position to stay on screen
+        if (x + width > this.width) {
+            x -= 28 + width;
+        }
+        if (y + height > this.height) {
+            y = this.height - height;
+        }
+        if (x < 0) {
+            x = 0;
+        }
+        if (y < 0) {
+            y = 0;
+        }
+
+        // Enable blending for transparency
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        
+        // Set transparency (0.7 alpha = 70% opacity)
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 0.7f);
+        
+        // Draw textured background
+        guiGraphics.blit(TOOLTIP_TEXTURE, x - 4, y - 4, 0, 0, width + 8, height + 8, width + 8, height + 8);
+        
+        // Reset shader color
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+        
+        // Draw text
+        int textY = y;
+        for (Component line : tooltip) {
+            guiGraphics.drawString(this.font, line, x + 4, textY, 0xFFFFFFFF, true);
+            textY += 10;
+        }
+        
+        RenderSystem.disableBlend();
     }
 
     @Override
@@ -347,6 +542,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
 
         if (button == 0 && mouseX >= startX + 10 && mouseX <= startX + 30 && 
             mouseY >= startY + 10 && mouseY <= startY + 30) {
+            playButtonClickSound();
             if (this.minecraft != null) {
                 this.minecraft.setScreen(new CreateCategoryScreen(this));
             }
@@ -355,6 +551,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
 
         if (button == 0 && mouseX >= startX + 50 && mouseX <= startX + 70 && 
             mouseY >= startY + 10 && mouseY <= startY + 30) {
+            playButtonClickSound();
             if (this.minecraft != null) {
                 this.minecraft.setScreen(new DeleteCategoryScreen(this));
             }
@@ -363,8 +560,16 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
 
         if (button == 0 && mouseX >= startX + 323 && mouseX <= startX + 363 && 
             mouseY >= startY + 100 && mouseY <= startY + 140) {
+            playButtonClickSound();
             if (this.minecraft != null) {
-                this.openAddItemScreen();
+                if (!ShopConfig.requiresAdminAddItem() || hasAdminPermission()) {
+                    this.openAddItemScreen();
+                } else {
+                    this.minecraft.player.displayClientMessage(
+                        Component.translatable("shop.pomeloshopmod.no_permission"), 
+                        false
+                    );
+                }
             }
             return true;
         }
@@ -373,7 +578,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             return true;
         }
 
-        if (handleCategoryClick((int) mouseX, (int) mouseY, startX, startY)) {
+        if (handleCategoryClick((int) mouseX, (int) mouseY, button, startX, startY)) {
             return true;
         }
 
@@ -389,42 +594,85 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     }
 
     private boolean handleCategoryScrollClick(int mouseX, int mouseY, int startX, int startY) {
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
-        if (categories.size() <= CATEGORIES_PER_PAGE) return false;
+        List<ShopCategory> mainCategories = CategoryManager.getInstance().getMainCategories();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList(mainCategories);
+        int maxDisplayItems = 6;
+        int itemHeight = 22;
+        
+        if (displayItems.size() <= maxDisplayItems) return false;
 
         int btnX = startX + 10;
-        int upBtnY = startY + 35 + CATEGORIES_PER_PAGE * 30 + 2;
+        int upBtnY = startY + 27 + maxDisplayItems * itemHeight + 2;
         int downBtnY = upBtnY + 22;
-        int btnW = 60;
+        int btnW = 56;
         int btnH = 20;
 
         if (mouseX >= btnX && mouseX <= btnX + btnW) {
             if (mouseY >= upBtnY && mouseY <= upBtnY + btnH && categoryScrollOffset > 0) {
                 categoryScrollOffset--;
-                updateDisplayedItems();
                 return true;
             }
             if (mouseY >= downBtnY && mouseY <= downBtnY + btnH && 
-                categoryScrollOffset < categories.size() - CATEGORIES_PER_PAGE) {
+                categoryScrollOffset < displayItems.size() - maxDisplayItems) {
                 categoryScrollOffset++;
-                updateDisplayedItems();
                 return true;
             }
         }
         return false;
     }
 
-    private boolean handleCategoryClick(int mouseX, int mouseY, int startX, int startY) {
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
+    private boolean handleCategoryClick(int mouseX, int mouseY, int button, int startX, int startY) {
+        List<ShopCategory> mainCategories = CategoryManager.getInstance().getMainCategories();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList(mainCategories);
         
-        int y = startY + 35;
-        for (int i = categoryScrollOffset; i < Math.min(categories.size(), categoryScrollOffset + CATEGORIES_PER_PAGE); i++) {
-            if (mouseX >= startX + 10 && mouseX <= startX + 70 && mouseY >= y && mouseY <= y + 25) {
-                currentCategory = categories.get(i).getId();
-                updateDisplayedItems();
-                return true;
+        int y = startY + 30;
+        int itemHeight = 14;
+        int maxDisplayItems = 8;
+        
+        for (int i = categoryScrollOffset; i < Math.min(displayItems.size(), categoryScrollOffset + maxDisplayItems); i++) {
+            CategoryDisplayItem item = displayItems.get(i);
+            ShopCategory category = item.category;
+            
+            int xOffset = item.isSubCategory ? 15 : 0;
+            int catWidth = item.isSubCategory ? 47 : 62;
+            
+            if (mouseX >= startX + 3 + xOffset && mouseX <= startX + 3 + xOffset + catWidth && 
+                mouseY >= y && mouseY <= y + itemHeight) {
+                
+                // Right click to edit category name
+                if (button == 1) {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new EditCategoryScreen(this, category));
+                    }
+                    return true;
+                }
+                
+                // Left click
+                if (button == 0) {
+                    if (item.isSubCategory) {
+                        // 点击二级分类：切换到该分类的商品列表
+                        currentCategory = category.getId();
+                        updateDisplayedItems();
+                    } else {
+                        // 点击一级分类：展开/折叠
+                        List<ShopCategory> subCategories = CategoryManager.getInstance().getSubCategories(category.getId());
+                        if (!subCategories.isEmpty()) {
+                            // 有二级分类时，切换展开状态
+                            if (expandedCategories.contains(category.getId())) {
+                                expandedCategories.remove(category.getId());
+                            } else {
+                                expandedCategories.add(category.getId());
+                            }
+                        } else {
+                            // 没有二级分类时，直接切换到该分类的商品列表
+                            currentCategory = category.getId();
+                            updateDisplayedItems();
+                        }
+                    }
+                    return true;
+                }
             }
-            y += 30;
+            y += itemHeight + 2;
         }
         return false;
     }
@@ -432,11 +680,37 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
     private boolean handleItemClick(int mouseX, int mouseY, int button, int startX, int startY) {
         if (hoveredItem == null) return false;
 
+        // Shift + left click to edit item (only for player listings)
+        if (button == 0 && net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
+            if (hoveredItem.isPlayerListing()) {
+                if (this.minecraft != null) {
+                    if (!ShopConfig.requiresAdminEditOwnItem() || hasAdminPermission()) {
+                        this.minecraft.setScreen(new EditItemScreen(this, hoveredItem));
+                    } else {
+                        this.minecraft.player.displayClientMessage(
+                            Component.translatable("shop.pomeloshopmod.no_permission"), 
+                            false
+                        );
+                    }
+                }
+            }
+            return true;
+        }
+
         if (button == 1 && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
             if (hoveredItem.isPlayerListing()) {
-                net.neoforged.neoforge.network.PacketDistributor.sendToServer(
-                    new shop.pomelo.mod.network.DeleteItemPacket(hoveredItem.getId())
-                );
+                if (!ShopConfig.requiresAdminDeleteOwnItem() || hasAdminPermission()) {
+                    net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                        new shop.pomelo.mod.network.DeleteItemPacket(hoveredItem.getId())
+                    );
+                } else {
+                    if (this.minecraft != null && this.minecraft.player != null) {
+                        this.minecraft.player.displayClientMessage(
+                            Component.translatable("shop.pomeloshopmod.no_permission"), 
+                            false
+                        );
+                    }
+                }
             }
             return true;
         }
@@ -463,7 +737,7 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             return true;
         }
 
-        if (button == 0 && hoveredItem.canBuy()) {
+        if (button == 0 && hoveredItem.canBuy() && !hoveredItem.isSoldOut()) {
             selectedItem = hoveredItem;
             selectedAmount = 1;
             showAmountSelector = true;
@@ -542,12 +816,12 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
         
         if (totalPages <= 1) return false;
 
-        if (mouseY >= startY + 200 && mouseY <= startY + 215) {
-            if (mouseX >= startX + 90 && mouseX <= startX + 140 && currentPage > 0) {
+        if (mouseY >= startY + 124 && mouseY <= startY + 139) {
+            if (mouseX >= startX + 100 && mouseX <= startX + 150 && currentPage > 0) {
                 currentPage--;
                 return true;
             }
-            if (mouseX >= startX + 260 && mouseX <= startX + 310 && currentPage < totalPages - 1) {
+            if (mouseX >= startX + 270 && mouseX <= startX + 320 && currentPage < totalPages - 1) {
                 currentPage++;
                 return true;
             }
@@ -581,6 +855,72 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
                 return true;
             }
         }
+        
+        // 处理 CTRL+C 复制商品
+        if (hasControlDown() && keyCode == 67) { // C键
+            if (hoveredItem != null) {
+                if (!ShopConfig.requiresAdminCopyItem() || hasAdminPermission()) {
+                    ShopClipboard.getInstance().copy(hoveredItem);
+                    if (this.minecraft != null && this.minecraft.player != null) {
+                        this.minecraft.player.displayClientMessage(
+                            Component.translatable("shop.pomeloshopmod.item_copied", hoveredItem.getHoverName()), 
+                            false
+                        );
+                    }
+                } else {
+                    if (this.minecraft != null && this.minecraft.player != null) {
+                        this.minecraft.player.displayClientMessage(
+                            Component.translatable("shop.pomeloshopmod.no_permission"), 
+                            false
+                        );
+                    }
+                }
+                return true;
+            }
+        }
+        
+        // 处理 CTRL+V 粘贴商品
+        if (hasControlDown() && keyCode == 86) { // V键
+            ShopClipboard clipboard = ShopClipboard.getInstance();
+            if (clipboard.hasContent()) {
+                if (currentCategory.isEmpty()) {
+                    if (this.minecraft != null && this.minecraft.player != null) {
+                        this.minecraft.player.displayClientMessage(
+                            Component.translatable("shop.pomeloshopmod.select_category_first"), 
+                            false
+                        );
+                    }
+                } else {
+                    if (!ShopConfig.requiresAdminPasteItem() || hasAdminPermission()) {
+                        // 发送粘贴商品的网络包
+                        net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                            new ListItemPacket(
+                                clipboard.getCopiedItemStack(),
+                                clipboard.getCopiedBuyPrice(),
+                                clipboard.getCopiedSellPrice(),
+                                clipboard.getCopiedAmount(),
+                                currentCategory,
+                                clipboard.getCopiedStock()
+                            )
+                        );
+                        if (this.minecraft != null && this.minecraft.player != null) {
+                            this.minecraft.player.displayClientMessage(
+                                Component.translatable("shop.pomeloshopmod.item_pasted", clipboard.getCopiedItemStack().getHoverName()), 
+                                false
+                            );
+                        }
+                    } else {
+                        if (this.minecraft != null && this.minecraft.player != null) {
+                            this.minecraft.player.displayClientMessage(
+                                Component.translatable("shop.pomeloshopmod.no_permission"), 
+                                false
+                            );
+                        }
+                    }
+                }
+                return true;
+            }
+        }
 
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
@@ -594,5 +934,12 @@ public class ShopScreen extends AbstractContainerScreen<ShopMenu> {
             net.minecraft.world.item.ItemStack heldItem = this.minecraft.player.getMainHandItem();
             this.minecraft.setScreen(new AddItemScreen(this, heldItem));
         }
+    }
+    
+    private boolean hasAdminPermission() {
+        if (this.minecraft != null && this.minecraft.player != null) {
+            return this.minecraft.player.hasPermissions(2);
+        }
+        return false;
     }
 }

@@ -5,6 +5,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import shop.pomelo.mod.ShopConfig;
+import shop.pomelo.mod.gui.DraggableWalletWidget;
 import shop.pomelo.mod.gui.ShopScreen;
 import shop.pomelo.mod.shop.BannedItemsManager;
 import shop.pomelo.mod.shop.CategoryManager;
@@ -33,6 +34,8 @@ public class NetworkHandler {
                 if (mc.screen instanceof ShopScreen shopScreen) {
                     shopScreen.setPlayerMoney(packet.money());
                 }
+                // 更新可拖拽钱包组件的余额
+                DraggableWalletWidget.setPlayerMoney(packet.money());
             }
         });
     }
@@ -43,6 +46,13 @@ public class NetworkHandler {
                 if (ShopConfig.requiresAdminListItem() && !serverPlayer.hasPermissions(2)) {
                     serverPlayer.sendSystemMessage(
                         net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.permission_denied")
+                    );
+                    return;
+                }
+
+                if (packet.itemStack().isEmpty()) {
+                    serverPlayer.sendSystemMessage(
+                        net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.no_item_in_hand")
                     );
                     return;
                 }
@@ -60,7 +70,8 @@ public class NetworkHandler {
                     packet.price(),
                     packet.sellPrice(),
                     packet.amount(),
-                    packet.categoryId()
+                    packet.categoryId(),
+                    packet.stock()
                 );
                 
                 if (itemId != null) {
@@ -69,6 +80,10 @@ public class NetworkHandler {
                     net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
                         serverPlayer, 
                         new SyncShopItemsPacket(items)
+                    );
+                } else {
+                    serverPlayer.sendSystemMessage(
+                        net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.list_failed")
                     );
                 }
             }
@@ -89,7 +104,8 @@ public class NetworkHandler {
                     packet.categoryId(),
                     packet.displayName(),
                     serverPlayer.getUUID(),
-                    serverPlayer.getName().getString()
+                    serverPlayer.getName().getString(),
+                    packet.parentId()
                 );
                 
                 java.util.List<shop.pomelo.mod.shop.ShopCategory> categories = 
@@ -129,6 +145,10 @@ public class NetworkHandler {
                     for (var category : packet.categories()) {
                         CategoryManager.getInstance().addCategoryWithoutSave(category);
                     }
+                    CategoryManager.getInstance().invalidateCache();
+                    
+                    // Also invalidate shop items cache to ensure fresh data
+                    ShopManager.getInstance().invalidateCache();
 
                     if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
                         shopScreen.refreshItems();
@@ -226,6 +246,80 @@ public class NetworkHandler {
 
                 int money = ShopManager.getInstance().getPlayerMoney(serverPlayer);
                 net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(serverPlayer, new SyncMoneyPacket(money));
+            }
+        });
+    }
+
+    public static void handleUpdateItem(UpdateItemPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() instanceof ServerPlayer serverPlayer) {
+                // Check permission - only the seller or admin can update
+                shop.pomelo.mod.shop.ShopItem item = ShopManager.getInstance().getItem(packet.itemId());
+                if (item == null) {
+                    return;
+                }
+
+                if (!item.isPlayerListing()) {
+                    return;
+                }
+
+                if (!item.getSellerUUID().equals(serverPlayer.getUUID()) && !serverPlayer.hasPermissions(2)) {
+                    serverPlayer.sendSystemMessage(
+                        net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.permission_denied")
+                    );
+                    return;
+                }
+
+                ShopManager.getInstance().updateItem(
+                    packet.itemId(),
+                    packet.buyPrice(),
+                    packet.sellPrice(),
+                    packet.amount(),
+                    packet.category(),
+                    packet.stock(),
+                    packet.newItemStack()
+                );
+
+                // Sync updated items to all players
+                java.util.List<shop.pomelo.mod.shop.ShopItem> items =
+                    new java.util.ArrayList<>(ShopManager.getInstance().getAllItems());
+                for (ServerPlayer player : serverPlayer.getServer().getPlayerList().getPlayers()) {
+                    net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
+                        player,
+                        new SyncShopItemsPacket(items)
+                    );
+                }
+            }
+        });
+    }
+
+    public static void handleUpdateCategory(UpdateCategoryPacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() instanceof ServerPlayer serverPlayer) {
+                // Check permission - only admin can update category name
+                if (!serverPlayer.hasPermissions(2)) {
+                    serverPlayer.sendSystemMessage(
+                        net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.permission_denied")
+                    );
+                    return;
+                }
+
+                boolean success = CategoryManager.getInstance().updateCategoryName(
+                    packet.categoryId(),
+                    packet.newName()
+                );
+
+                if (success) {
+                    // Sync updated categories to all players
+                    java.util.List<shop.pomelo.mod.shop.ShopCategory> categories =
+                        new java.util.ArrayList<>(CategoryManager.getInstance().getCategories());
+                    for (ServerPlayer player : serverPlayer.getServer().getPlayerList().getPlayers()) {
+                        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
+                            player,
+                            new SyncCategoriesPacket(categories)
+                        );
+                    }
+                }
             }
         });
     }

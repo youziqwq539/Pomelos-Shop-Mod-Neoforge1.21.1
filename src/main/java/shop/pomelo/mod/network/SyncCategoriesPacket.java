@@ -29,6 +29,12 @@ public record SyncCategoriesPacket(
             buffer.writeUtf(category.getDisplayName());
             buffer.writeUtf(category.getCreatorUUID().toString());
             buffer.writeUtf(category.getCreatorName());
+            buffer.writeVarInt(category.getOrderIndex());
+            String parentId = category.getParentId();
+            buffer.writeBoolean(parentId != null && !parentId.isEmpty());
+            if (parentId != null && !parentId.isEmpty()) {
+                buffer.writeUtf(parentId);
+            }
         }
     }
     
@@ -41,8 +47,13 @@ public record SyncCategoriesPacket(
             String displayName = buffer.readUtf();
             UUID creatorUUID = UUID.fromString(buffer.readUtf());
             String creatorName = buffer.readUtf();
+            int orderIndex = buffer.readVarInt();
+            String parentId = null;
+            if (buffer.readBoolean()) {
+                parentId = buffer.readUtf();
+            }
             
-            ShopCategory category = new ShopCategory(id, displayName, creatorUUID, creatorName);
+            ShopCategory category = new ShopCategory(id, displayName, creatorUUID, creatorName, orderIndex, parentId);
             categories.add(category);
         }
         

@@ -1,0 +1,10 @@
+{
+  "shop_click": {
+    "sounds": [
+      {
+        "name": "pomeloshopmod:shop_click",
+        "stream": false
+      }
+    ]
+  }
+}

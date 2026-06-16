@@ -5,11 +5,12 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import shop.pomelo.mod.network.DeleteCategoryPacket;
 import shop.pomelo.mod.shop.CategoryManager;
 import shop.pomelo.mod.shop.ShopCategory;
+import shop.pomelo.mod.sound.ModSounds;
 
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
 
 public class DeleteCategoryScreen extends Screen {
@@ -20,9 +21,22 @@ public class DeleteCategoryScreen extends Screen {
     private int scrollOffset = 0;
     private static final int CATEGORIES_PER_PAGE = 6;
 
+    // 退出按钮位置和大小
+    private static final int EXIT_BTN_WIDTH = 20;
+    private static final int EXIT_BTN_HEIGHT = 20;
+
     public DeleteCategoryScreen(Screen parentScreen) {
         super(Component.translatable("shop.pomeloshopmod.delete_category_title"));
         this.parentScreen = parentScreen;
+    }
+    
+    /**
+     * 播放按钮点击音效
+     */
+    private void playButtonClickSound() {
+        if (this.minecraft != null && this.minecraft.player != null) {
+            this.minecraft.player.playSound(ModSounds.SHOP_CLICK.get(), 0.3F, 1.0F);
+        }
     }
 
     @Override
@@ -35,8 +49,8 @@ public class DeleteCategoryScreen extends Screen {
     }
 
     private boolean canScrollDown() {
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
-        return scrollOffset + CATEGORIES_PER_PAGE < categories.size();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList();
+        return scrollOffset + CATEGORIES_PER_PAGE < displayItems.size();
     }
 
     private void scrollUp() {
@@ -61,6 +75,21 @@ public class DeleteCategoryScreen extends Screen {
         guiGraphics.drawString(this.font, text, centerX - width / 2, y, color, false);
     }
 
+    private List<CategoryDisplayItem> buildCategoryDisplayList() {
+        List<CategoryDisplayItem> items = new ArrayList<>();
+        List<ShopCategory> mainCategories = CategoryManager.getInstance().getMainCategories();
+        
+        for (ShopCategory mainCat : mainCategories) {
+            items.add(new CategoryDisplayItem(mainCat, false));
+            // 添加该一级分类下的二级分类
+            List<ShopCategory> subCategories = CategoryManager.getInstance().getSubCategories(mainCat.getId());
+            for (ShopCategory subCat : subCategories) {
+                items.add(new CategoryDisplayItem(subCat, true));
+            }
+        }
+        return items;
+    }
+
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         int centerX = this.width / 2;
@@ -73,43 +102,64 @@ public class DeleteCategoryScreen extends Screen {
 
         drawCenteredStringNoShadow(guiGraphics, this.title, centerX, centerY - 80, Color.BLACK.getRGB());
 
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList();
         
-        if (categories.isEmpty()) {
+        if (displayItems.isEmpty()) {
             drawCenteredStringNoShadow(guiGraphics, 
                 Component.translatable("shop.pomeloshopmod.no_categories_to_delete"), 
                 centerX, centerY, Color.BLACK.getRGB());
         } else {
             int y = centerY - 55;
-            int endIndex = Math.min(scrollOffset + CATEGORIES_PER_PAGE, categories.size());
+            int endIndex = Math.min(scrollOffset + CATEGORIES_PER_PAGE, displayItems.size());
             
             for (int i = scrollOffset; i < endIndex; i++) {
-                ShopCategory category = categories.get(i);
+                CategoryDisplayItem item = displayItems.get(i);
+                ShopCategory category = item.category;
                 
-                boolean isHovered = mouseX >= centerX - 100 && mouseX <= centerX + 100 && 
+                int catWidth = 200;
+                
+                boolean isHovered = mouseX >= centerX - 100 && mouseX <= centerX - 100 + catWidth && 
                                    mouseY >= y && mouseY <= y + 18;
                 
                 if (isHovered) {
-                    guiGraphics.blit(BUTTONS_TEXTURE, centerX - 100, y, 0, 214, 200, 18);
+                    guiGraphics.blit(BUTTONS_TEXTURE, centerX - 100, y, 0, 214, catWidth, 18);
                 }
                 
-                drawCenteredStringNoShadow(guiGraphics, category.getDisplayName(), centerX, y + 4, Color.BLACK.getRGB());
+                // 二级分类显示前缀
+                String displayText = item.isSubCategory ? "  └ " + category.getDisplayName() : category.getDisplayName();
+                int textColor = item.isSubCategory ? new Color(80, 80, 80).getRGB() : Color.BLACK.getRGB();
+                drawCenteredStringNoShadow(guiGraphics, displayText, centerX, y + 4, textColor);
                 
                 y += 22;
             }
             
-            String pageText = (scrollOffset + 1) + "-" + Math.min(scrollOffset + CATEGORIES_PER_PAGE, categories.size()) + 
-                             " / " + categories.size();
+            String pageText = (scrollOffset + 1) + "-" + Math.min(scrollOffset + CATEGORIES_PER_PAGE, displayItems.size()) + 
+                             " / " + displayItems.size();
             int totalHeight = CATEGORIES_PER_PAGE * 22;
             drawCenteredStringNoShadow(guiGraphics, pageText, centerX, centerY - 55 + totalHeight, Color.BLACK.getRGB());
 
-            drawScrollButtons(guiGraphics, centerX, centerY, mouseX, mouseY);
+            drawScrollButtons(guiGraphics, centerX, centerY, mouseX, mouseY, displayItems.size());
         }
 
         drawBackButton(guiGraphics, centerX, centerY, mouseX, mouseY);
+        drawExitButton(guiGraphics, centerX, centerY, mouseX, mouseY);
     }
 
-    private void drawScrollButtons(GuiGraphics guiGraphics, int centerX, int centerY, int mouseX, int mouseY) {
+    private void drawExitButton(GuiGraphics guiGraphics, int centerX, int centerY, int mouseX, int mouseY) {
+        int btnX = centerX + 105;
+        int btnY = centerY - 82;
+        
+        boolean hovered = mouseX >= btnX && mouseX <= btnX + EXIT_BTN_WIDTH && 
+                         mouseY >= btnY && mouseY <= btnY + EXIT_BTN_HEIGHT;
+        
+        if (hovered) {
+            guiGraphics.blit(BUTTONS_TEXTURE, btnX, btnY, 0, 234, EXIT_BTN_WIDTH, EXIT_BTN_HEIGHT);
+        }
+        
+        drawCenteredStringNoShadow(guiGraphics, "✕", btnX + EXIT_BTN_WIDTH / 2, btnY + 4, Color.BLACK.getRGB());
+    }
+
+    private void drawScrollButtons(GuiGraphics guiGraphics, int centerX, int centerY, int mouseX, int mouseY, int totalItems) {
         int btnX = centerX + 110;
         int upBtnY = centerY - 55;
         int downBtnY = centerY + 42;
@@ -167,24 +217,40 @@ public class DeleteCategoryScreen extends Screen {
 
             if (mouseX >= centerX - 50 && mouseX <= centerX + 50 && 
                 mouseY >= centerY + 234 && mouseY <= centerY + 254) {
+                playButtonClickSound();
+                this.onClose();
+                return true;
+            }
+
+            // 退出按钮
+            int exitBtnX = centerX + 105;
+            int exitBtnY = centerY - 82;
+            if (mouseX >= exitBtnX && mouseX <= exitBtnX + EXIT_BTN_WIDTH &&
+                mouseY >= exitBtnY && mouseY <= exitBtnY + EXIT_BTN_HEIGHT) {
+                playButtonClickSound();
                 this.onClose();
                 return true;
             }
         }
 
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList();
         
-        if (!categories.isEmpty()) {
+        if (!displayItems.isEmpty()) {
             int y = centerY - 55;
-            int endIndex = Math.min(scrollOffset + CATEGORIES_PER_PAGE, categories.size());
+            int endIndex = Math.min(scrollOffset + CATEGORIES_PER_PAGE, displayItems.size());
+            int catWidth = 200;
             
             for (int i = scrollOffset; i < endIndex; i++) {
-                if (mouseX >= centerX - 100 && mouseX <= centerX + 100 && 
+                CategoryDisplayItem item = displayItems.get(i);
+                ShopCategory category = item.category;
+                
+                if (mouseX >= centerX - 100 && mouseX <= centerX - 100 + catWidth && 
                     mouseY >= y && mouseY <= y + 18) {
-                    ShopCategory category = categories.get(i);
-                    net.neoforged.neoforge.network.PacketDistributor.sendToServer(
-                        new DeleteCategoryPacket(category.getId())
-                    );
+                    playButtonClickSound();
+                    // 打开确认删除屏幕
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new ConfirmDeleteCategoryScreen(this, category));
+                    }
                     return true;
                 }
                 y += 22;
@@ -196,9 +262,9 @@ public class DeleteCategoryScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
-        List<ShopCategory> categories = CategoryManager.getInstance().getCategories();
+        List<CategoryDisplayItem> displayItems = buildCategoryDisplayList();
         
-        if (categories.size() > CATEGORIES_PER_PAGE) {
+        if (displayItems.size() > CATEGORIES_PER_PAGE) {
             if (deltaY > 0) {
                 scrollUp();
             } else if (deltaY < 0) {
@@ -220,5 +286,15 @@ public class DeleteCategoryScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+    
+    private static class CategoryDisplayItem {
+        final ShopCategory category;
+        final boolean isSubCategory;
+        
+        CategoryDisplayItem(ShopCategory category, boolean isSubCategory) {
+            this.category = category;
+            this.isSubCategory = isSubCategory;
+        }
     }
 }

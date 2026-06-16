@@ -13,7 +13,8 @@ public record ListItemPacket(
     int price,
     int sellPrice,
     int amount,
-    String categoryId
+    String categoryId,
+    int stock
 ) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<ListItemPacket> TYPE = 
         new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(PomelosShopMod.MODID, "list_item"));
@@ -29,6 +30,8 @@ public record ListItemPacket(
         ListItemPacket::amount,
         ByteBufCodecs.STRING_UTF8,
         ListItemPacket::categoryId,
+        ByteBufCodecs.VAR_INT,
+        ListItemPacket::stock,
         ListItemPacket::new
     );
     

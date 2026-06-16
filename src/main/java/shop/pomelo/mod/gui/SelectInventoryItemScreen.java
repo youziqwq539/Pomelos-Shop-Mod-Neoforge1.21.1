@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import shop.pomelo.mod.sound.ModSounds;
 
 import java.awt.*;
 import java.util.function.Consumer;
@@ -29,6 +30,15 @@ public class SelectInventoryItemScreen extends Screen {
         super(Component.translatable("shop.pomeloshopmod.select_inventory_item"));
         this.parentScreen = parentScreen;
         this.onSelect = onSelect;
+    }
+    
+    /**
+     * 播放按钮点击音效
+     */
+    private void playButtonClickSound() {
+        if (this.minecraft != null && this.minecraft.player != null) {
+            this.minecraft.player.playSound(ModSounds.SHOP_CLICK.get(), 0.3F, 1.0F);
+        }
     }
 
     @Override
@@ -83,7 +93,15 @@ public class SelectInventoryItemScreen extends Screen {
                 guiGraphics.renderTooltip(this.font, hoveredStack, mouseX, mouseY);
             }
         }
+    }
 
+    @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        super.renderBackground(guiGraphics, mouseX, mouseY, partialTick);
+        
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+        
         drawCancelButton(guiGraphics, centerX, centerY, mouseX, mouseY);
     }
 
@@ -112,6 +130,7 @@ public class SelectInventoryItemScreen extends Screen {
                 Inventory inventory = Minecraft.getInstance().player.getInventory();
                 ItemStack selectedStack = inventory.items.get(hoveredSlot);
                 if (!selectedStack.isEmpty()) {
+                    playButtonClickSound();
                     onSelect.accept(selectedStack.copy());
                     this.onClose();
                     return true;
@@ -125,6 +144,7 @@ public class SelectInventoryItemScreen extends Screen {
 
             if (mouseX >= btnX && mouseX <= btnX + btnW && 
                 mouseY >= btnY && mouseY <= btnY + btnH) {
+                playButtonClickSound();
                 this.onClose();
                 return true;
             }

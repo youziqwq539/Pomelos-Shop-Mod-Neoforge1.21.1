@@ -8,6 +8,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import shop.pomelo.mod.PomelosShopMod;
+import shop.pomelo.mod.network.SyncMoneyPacket;
+import shop.pomelo.mod.network.SyncShopItemsPacket;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -76,7 +78,7 @@ public class ShopManager {
         this.dataPath = path;
     }
 
-    private void invalidateCache() {
+    public void invalidateCache() {
         sortedCache = null;
         categoryIndex.clear();
     }
@@ -124,6 +126,84 @@ public class ShopManager {
 
     public ShopItem getItem(String id) {
         return items.get(id);
+    }
+
+    public void updateItem(String id, int buyPrice, int sellPrice, int amount, String category) {
+        updateItem(id, buyPrice, sellPrice, amount, category, 0);
+    }
+
+    public void updateItem(String id, int buyPrice, int sellPrice, int amount, String category, int stock) {
+        ShopItem existing = items.get(id);
+        if (existing == null) {
+            return;
+        }
+
+        updateItem(id, buyPrice, sellPrice, amount, category, stock, existing.getItemStack().copy());
+    }
+
+    public void updateItem(String id, int buyPrice, int sellPrice, int amount, String category, int stock, net.minecraft.world.item.ItemStack newItemStack) {
+        ShopItem existing = items.get(id);
+        if (existing == null) {
+            return;
+        }
+
+        ShopItem updated = new ShopItem(
+            id,
+            newItemStack.copy(),
+            buyPrice,
+            sellPrice,
+            category,
+            buyPrice > 0,
+            sellPrice > 0,
+            existing.getSellerUUID(),
+            existing.getSellerName(),
+            amount,
+            existing.getOrderIndex(),
+            stock
+        );
+
+        items.put(id, updated);
+        invalidateCache();
+        markDirty();
+    }
+
+    /**
+     * 更新商品库存
+     */
+    public void updateItemStock(String id, int newStock) {
+        ShopItem existing = items.get(id);
+        if (existing == null) {
+            return;
+        }
+
+        ShopItem updated = new ShopItem(
+            id,
+            existing.getItemStack().copy(),
+            existing.getBuyPrice(),
+            existing.getSellPrice(),
+            existing.getCategory(),
+            existing.canBuy(),
+            existing.canSell(),
+            existing.getSellerUUID(),
+            existing.getSellerName(),
+            existing.getAmount(),
+            existing.getOrderIndex(),
+            newStock
+        );
+
+        items.put(id, updated);
+        invalidateCache();
+        markDirty();
+    }
+
+    /**
+     * 同步商品数据给所有在线玩家
+     */
+    public void syncItemsToAllPlayers() {
+        java.util.List<ShopItem> itemsList = new java.util.ArrayList<>(getAllItems());
+        net.neoforged.neoforge.network.PacketDistributor.sendToAllPlayers(
+            new SyncShopItemsPacket(itemsList)
+        );
     }
 
     public int getItemCount() {
@@ -208,6 +288,22 @@ public class ShopManager {
             return false;
         }
 
+        // 检查库存：如果商品有有限库存且已售空，则无法购买
+        if (item.isSoldOut()) {
+            player.sendSystemMessage(
+                net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.item_sold_out")
+            );
+            return false;
+        }
+
+        // 检查购买数量是否超过库存
+        if (item.hasLimitedStock() && amount > item.getStock()) {
+            player.sendSystemMessage(
+                net.minecraft.network.chat.Component.translatable("shop.pomeloshopmod.insufficient_stock", item.getStock())
+            );
+            return false;
+        }
+
         int totalCost = item.getBuyPrice() * amount;
         if (!hasEnoughMoney(player, totalCost)) {
             return false;
@@ -223,6 +319,19 @@ public class ShopManager {
 
         if (!player.getInventory().add(purchasedItem)) {
             player.drop(purchasedItem, false);
+        }
+
+        // 减少库存（如果有有限库存）
+        if (item.hasLimitedStock()) {
+            int newStock = item.getStock() - amount;
+            // 如果库存减到0或以下，设为-1表示已售空
+            if (newStock <= 0) {
+                newStock = -1;
+            }
+            updateItemStock(itemId, newStock);
+            
+            // 同步更新给所有在线玩家
+            syncItemsToAllPlayers();
         }
 
         return true;
@@ -252,6 +361,20 @@ public class ShopManager {
 
         int totalValue = item.getSellPrice() * amount;
         addMoney(player, totalValue);
+
+        // 出售后增加库存
+        int currentStock = item.getStock();
+        if (currentStock == -1) {
+            // 已售空状态，出售后恢复库存
+            item.setStock(amount);
+        } else if (currentStock > 0) {
+            // 有限库存，增加库存
+            item.setStock(currentStock + amount);
+        }
+        // 无限库存（stock == 0）不需要修改
+
+        // 同步库存更新给所有玩家
+        syncItemsToAllPlayers();
 
         return true;
     }
@@ -308,6 +431,7 @@ public class ShopManager {
                     itemObj.addProperty("sellerName", item.getSellerName());
                 }
                 itemObj.addProperty("orderIndex", item.getOrderIndex());
+                itemObj.addProperty("stock", item.getStock());
                 itemsArray.add(itemObj);
             }
             root.add("items", itemsArray);
@@ -358,12 +482,13 @@ public class ShopManager {
                         sellerName = itemObj.get("sellerName").getAsString();
                     }
                     long orderIndex = itemObj.has("orderIndex") ? itemObj.get("orderIndex").getAsLong() : i;
+                    int stock = itemObj.has("stock") ? itemObj.get("stock").getAsInt() : 0;
 
                     net.minecraft.resources.ResourceLocation itemLoc = net.minecraft.resources.ResourceLocation.parse(itemStr);
                     net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(itemLoc);
                     if (item != net.minecraft.world.item.Items.AIR) {
                         ItemStack stack = new ItemStack(item, count);
-                        addItem(new ShopItem(id, stack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, count, orderIndex));
+                        addItem(new ShopItem(id, stack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, count, orderIndex, stock));
                     }
                 }
             }
@@ -383,6 +508,10 @@ public class ShopManager {
     }
 
     public String listItem(ServerPlayer seller, ItemStack itemStack, int price, int sellPrice, int amount, String categoryId) {
+        return listItem(seller, itemStack, price, sellPrice, amount, categoryId, 0);
+    }
+
+    public String listItem(ServerPlayer seller, ItemStack itemStack, int price, int sellPrice, int amount, String categoryId, int stock) {
         if (itemStack.isEmpty() || price <= 0 || amount <= 0) {
             return null;
         }
@@ -414,7 +543,8 @@ public class ShopManager {
                 seller.getUUID(),
                 seller.getName().getString(),
                 amount,
-                orderIdx
+                orderIdx,
+                stock
             );
             addItem(shopItem);
         }
@@ -459,6 +589,23 @@ public class ShopManager {
         return true;
     }
 
+    public void removeItemsByCategory(String categoryId) {
+        java.util.List<String> toRemove = new java.util.ArrayList<>();
+        for (ShopItem item : items.values()) {
+            if (categoryId.equals(item.getCategory())) {
+                toRemove.add(item.getId());
+            }
+        }
+        for (String id : toRemove) {
+            items.remove(id);
+        }
+        if (!toRemove.isEmpty()) {
+            invalidateCache();
+            markDirty();
+            PomelosShopMod.LOGGER.debug("Removed {} items from category: {}", toRemove.size(), categoryId);
+        }
+    }
+
     public void clearAllItems(net.minecraft.server.MinecraftServer server) {
         items.clear();
         invalidateCache();
@@ -485,4 +632,88 @@ public class ShopManager {
         }
     }
 
+    public JsonObject exportToJson() {
+        JsonObject root = new JsonObject();
+
+        JsonArray itemsArray = new JsonArray();
+        for (ShopItem item : items.values()) {
+            JsonObject itemObj = new JsonObject();
+            itemObj.addProperty("id", item.getId());
+            itemObj.addProperty("item", BuiltInRegistries.ITEM.getKey(item.getItemStack().getItem()).toString());
+            itemObj.addProperty("count", item.getItemStack().getCount());
+            itemObj.addProperty("buyPrice", item.getBuyPrice());
+            itemObj.addProperty("sellPrice", item.getSellPrice());
+            itemObj.addProperty("category", item.getCategory());
+            itemObj.addProperty("canBuy", item.canBuy());
+            itemObj.addProperty("canSell", item.canSell());
+            if (item.getSellerUUID() != null) {
+                itemObj.addProperty("sellerUUID", item.getSellerUUID().toString());
+            }
+            if (item.getSellerName() != null) {
+                itemObj.addProperty("sellerName", item.getSellerName());
+            }
+            itemObj.addProperty("orderIndex", item.getOrderIndex());
+            itemsArray.add(itemObj);
+        }
+        root.add("items", itemsArray);
+
+        return root;
+    }
+
+    public int importFromJson(JsonObject root, boolean clearExisting) {
+        if (clearExisting) {
+            items.clear();
+            categoryIndex.clear();
+            sortedCache = null;
+            nextOrderIndex = 0;
+        }
+
+        int importedCount = 0;
+        if (root.has("items")) {
+            JsonArray itemsArray = root.getAsJsonArray("items");
+            for (int i = 0; i < itemsArray.size(); i++) {
+                JsonObject itemObj = itemsArray.get(i).getAsJsonObject();
+                String id = itemObj.get("id").getAsString();
+                String itemStr = itemObj.get("item").getAsString();
+                int count = itemObj.has("count") ? itemObj.get("count").getAsInt() : 1;
+                int buyPrice = itemObj.get("buyPrice").getAsInt();
+                int sellPrice = itemObj.get("sellPrice").getAsInt();
+                String category = itemObj.get("category").getAsString();
+                boolean canBuy = itemObj.has("canBuy") ? itemObj.get("canBuy").getAsBoolean() : true;
+                boolean canSell = itemObj.has("canSell") ? itemObj.get("canSell").getAsBoolean() : true;
+                UUID sellerUUID = null;
+                String sellerName = null;
+                if (itemObj.has("sellerUUID")) {
+                    sellerUUID = UUID.fromString(itemObj.get("sellerUUID").getAsString());
+                }
+                if (itemObj.has("sellerName")) {
+                    sellerName = itemObj.get("sellerName").getAsString();
+                }
+                long orderIndex = itemObj.has("orderIndex") ? itemObj.get("orderIndex").getAsLong() : nextOrderIndex;
+
+                net.minecraft.resources.ResourceLocation itemLoc = net.minecraft.resources.ResourceLocation.parse(itemStr);
+                net.minecraft.world.item.Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(itemLoc);
+                if (item != net.minecraft.world.item.Items.AIR) {
+                    ItemStack stack = new ItemStack(item, count);
+                    addItem(new ShopItem(id, stack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, count, orderIndex));
+                    importedCount++;
+                }
+            }
+        }
+
+        if (importedCount > 0) {
+            invalidateCache();
+            markDirty();
+        }
+
+        return importedCount;
+    }
+
+    /**
+     * 同步玩家余额到客户端
+     */
+    public void syncMoneyToClient(ServerPlayer player) {
+        int money = getPlayerMoney(player);
+        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player, new SyncMoneyPacket(money));
+    }
 }

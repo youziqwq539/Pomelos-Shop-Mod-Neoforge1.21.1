@@ -17,20 +17,27 @@ public class ShopItem {
     private final String sellerName;
     private final int amount;
     private final long orderIndex;
+    // 库存数量，0表示无限库存，负数表示已售空
+    private int stock;
     // Cache the display name to avoid repeated ItemStack copy + Component resolution
     private final Component cachedHoverName;
 
     public ShopItem(String id, ItemStack itemStack, int buyPrice, int sellPrice, String category, boolean canBuy, boolean canSell) {
-        this(id, itemStack, buyPrice, sellPrice, category, canBuy, canSell, null, null, itemStack.getCount(), 0);
+        this(id, itemStack, buyPrice, sellPrice, category, canBuy, canSell, null, null, itemStack.getCount(), 0, 0);
     }
 
     public ShopItem(String id, ItemStack itemStack, int buyPrice, int sellPrice, String category,
                     boolean canBuy, boolean canSell, UUID sellerUUID, String sellerName, int amount) {
-        this(id, itemStack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, amount, 0);
+        this(id, itemStack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, amount, 0, 0);
     }
 
     public ShopItem(String id, ItemStack itemStack, int buyPrice, int sellPrice, String category,
                     boolean canBuy, boolean canSell, UUID sellerUUID, String sellerName, int amount, long orderIndex) {
+        this(id, itemStack, buyPrice, sellPrice, category, canBuy, canSell, sellerUUID, sellerName, amount, orderIndex, 0);
+    }
+
+    public ShopItem(String id, ItemStack itemStack, int buyPrice, int sellPrice, String category,
+                    boolean canBuy, boolean canSell, UUID sellerUUID, String sellerName, int amount, long orderIndex, int stock) {
         this.id = id;
         this.itemStack = itemStack.copy(); // Store one copy at construction time
         this.buyPrice = buyPrice;
@@ -42,6 +49,7 @@ public class ShopItem {
         this.sellerName = sellerName;
         this.amount = amount;
         this.orderIndex = orderIndex;
+        this.stock = stock;
         // Pre-compute the hover name once — ItemStack.getHoverName() creates a new Component each call
         this.cachedHoverName = this.itemStack.getHoverName();
     }
@@ -72,7 +80,7 @@ public class ShopItem {
     }
 
     public boolean canBuy() {
-        return canBuy && buyPrice > 0;
+        return canBuy && buyPrice > 0 && !isSoldOut();
     }
 
     public boolean canSell() {
@@ -114,5 +122,33 @@ public class ShopItem {
 
     public long getOrderIndex() {
         return orderIndex;
+    }
+
+    public int getStock() {
+        return stock;
+    }
+
+    /**
+     * 设置库存数量
+     * @param stock 库存数量，0表示无限库存，负数表示已售空
+     */
+    public void setStock(int stock) {
+        this.stock = stock;
+    }
+
+    /**
+     * 检查商品是否已售空
+     * stock == -1 表示已售空
+     */
+    public boolean isSoldOut() {
+        return stock == -1;
+    }
+
+    /**
+     * 检查商品是否有有限库存
+     * stock > 0 表示有限库存
+     */
+    public boolean hasLimitedStock() {
+        return stock > 0;
     }
 }

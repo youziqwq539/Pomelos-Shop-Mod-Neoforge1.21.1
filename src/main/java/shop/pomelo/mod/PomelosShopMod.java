@@ -20,19 +20,25 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.neoforged.fml.config.ModConfig;
 import shop.pomelo.mod.command.ShopCommand;
+import shop.pomelo.mod.event.PlayerEventHandler;
 import shop.pomelo.mod.gui.ShopMenu;
+import shop.pomelo.mod.item.ModItems;
 import shop.pomelo.mod.network.CreateCategoryPacket;
 import shop.pomelo.mod.network.DeleteCategoryPacket;
 import shop.pomelo.mod.network.DeleteItemPacket;
 import shop.pomelo.mod.network.ListItemPacket;
 import shop.pomelo.mod.network.NetworkHandler;
 import shop.pomelo.mod.network.OpenShopPacket;
+import shop.pomelo.mod.network.RequestMoneyPacket;
 import shop.pomelo.mod.network.ShopActionPacket;
 import shop.pomelo.mod.network.SyncCategoriesPacket;
 import shop.pomelo.mod.network.SyncMoneyPacket;
 import shop.pomelo.mod.network.SyncShopItemsPacket;
+import shop.pomelo.mod.network.UpdateCategoryPacket;
+import shop.pomelo.mod.network.UpdateItemPacket;
 import shop.pomelo.mod.shop.BannedItemsManager;
 import shop.pomelo.mod.shop.ShopManager;
+import shop.pomelo.mod.sound.ModSounds;
 
 @Mod(PomelosShopMod.MODID)
 public class PomelosShopMod {
@@ -42,10 +48,17 @@ public class PomelosShopMod {
     public static final DeferredRegister<MenuType<?>> MENUS = DeferredRegister.create(BuiltInRegistries.MENU, MODID);
     public static final DeferredHolder<MenuType<?>, MenuType<ShopMenu>> SHOP_MENU = MENUS.register("shop", 
         () -> new MenuType<ShopMenu>(ShopMenu::new, net.minecraft.world.flag.FeatureFlags.DEFAULT_FLAGS));
+    public static final DeferredHolder<MenuType<?>, MenuType<shop.pomelo.mod.gui.WalletMenu>> WALLET_MENU = MENUS.register("wallet", 
+        () -> new MenuType<shop.pomelo.mod.gui.WalletMenu>((containerId, inventory) -> 
+            new shop.pomelo.mod.gui.WalletMenu(containerId, inventory), 
+            net.minecraft.world.flag.FeatureFlags.DEFAULT_FLAGS));
 
     public PomelosShopMod(IEventBus modEventBus, ModContainer modContainer) {
         MENUS.register(modEventBus);
+        ModItems.register(modEventBus);
+        ModSounds.register(modEventBus);
         NeoForge.EVENT_BUS.register(this);
+        NeoForge.EVENT_BUS.register(new PlayerEventHandler());
         modEventBus.addListener(this::registerPackets);
         modEventBus.addListener(ShopConfig::onLoad);
         modContainer.registerConfig(ModConfig.Type.SERVER, ShopConfig.SPEC);
@@ -115,6 +128,12 @@ public class PomelosShopMod {
             NetworkHandler::handleDeleteCategory);
         registrar.playToServer(OpenShopPacket.TYPE, OpenShopPacket.STREAM_CODEC,
             NetworkHandler::handleOpenShop);
+        registrar.playToServer(UpdateItemPacket.TYPE, UpdateItemPacket.STREAM_CODEC,
+            NetworkHandler::handleUpdateItem);
+        registrar.playToServer(UpdateCategoryPacket.TYPE, UpdateCategoryPacket.STREAM_CODEC,
+            NetworkHandler::handleUpdateCategory);
+        registrar.playToServer(RequestMoneyPacket.TYPE, RequestMoneyPacket.STREAM_CODEC,
+            RequestMoneyPacket::handle);
 
         LOGGER.info("Network packets registered");
     }

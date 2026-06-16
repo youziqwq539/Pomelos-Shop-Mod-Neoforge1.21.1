@@ -38,6 +38,7 @@ public record SyncShopItemsPacket(
                 buffer.writeUtf(item.getSellerUUID().toString());
             }
             buffer.writeVarLong(item.getOrderIndex());
+            buffer.writeVarInt(item.getStock());
             
             ItemStack.STREAM_CODEC.encode(buffer, item.getDisplayStack());
         }
@@ -66,6 +67,7 @@ public record SyncShopItemsPacket(
                 sellerUUID = java.util.UUID.fromString(buffer.readUtf());
             }
             long orderIndex = buffer.readVarLong();
+            int stock = buffer.readVarInt();
             
             ItemStack displayStack = ItemStack.STREAM_CODEC.decode(buffer);
             
@@ -80,7 +82,8 @@ public record SyncShopItemsPacket(
                 sellerUUID,
                 sellerName,
                 amount,
-                orderIndex
+                orderIndex,
+                stock
             );
             items.add(item);
         }
